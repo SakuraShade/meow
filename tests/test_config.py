@@ -21,6 +21,13 @@ class TestCatifyParams(unittest.TestCase):
         params = CatifyParams()
         self.assertEqual(params.strength, 2)
         self.assertTrue(params.add_tilde)
+        self.assertTrue(params.split_on_space)
+
+    def test_split_on_space_roundtrip(self):
+        params = CatifyParams(split_on_space=False)
+        self.assertFalse(CatifyParams.from_dict(params.to_dict()).split_on_space)
+        self.assertFalse(CatifyParams.from_dict({"split_on_space": False}).split_on_space)
+        self.assertTrue(CatifyParams.from_dict({"split_on_space": "yes"}).split_on_space)
 
     def test_clamp_out_of_range(self):
         params = CatifyParams(strength=99, kaomoji_prob=5.0, kaomoji_std=-3.0).clamp()

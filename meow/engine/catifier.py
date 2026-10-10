@@ -24,7 +24,7 @@ from .sentence import (
 )
 
 # 句末标点（改写前先摘掉，改写后按句式重新贴回去）
-TRAILING_PUNCT_RE = re.compile(r"([。！？!?…~～]+)$")
+TRAILING_PUNCT_RE = re.compile(r"([。！？!?…~～.]+)$")
 
 # 疑问句改用疑问系颜文字的概率
 QUESTION_KAOMOJI_PROB = 0.5
@@ -46,7 +46,10 @@ class CatifyEngine:
         return self.catify(text, base)
 
     def catify(self, text: str, params: CatifyParams | None = None) -> str:
-        """把整段文本猫化，保留原有换行结构。
+        """把整段文本猫化，保留原有换行与标点结构。
+
+        切句时逗号、顿号、分号、空格都会把小句切开（各给小句补一个「喵」），
+        但这些分隔符本身会原样输出，不会被语气词挤掉。
 
         颜文字分布策略：
 
@@ -60,13 +63,15 @@ class CatifyEngine:
         if settings.seed is not None:
             self._random.seed(settings.seed)
 
-        segments = split_sentences(text)
+        segments = split_sentences(text, split_on_space=settings.split_on_space)
         kaomoji_positions = self._plan_kaomoji(segments, settings)
 
         pieces: list[str] = []
         for index, segment in enumerate(segments):
-            if not segment.is_sentence:
-                pieces.append("\n")
+            literal = segment.literal
+            if literal is not None:
+                # 换行、逗号、空格等原样输出
+                pieces.append(literal)
                 continue
             pieces.append(
                 self.catify_sentence(
@@ -117,8 +122,8 @@ class CatifyEngine:
         if settings.strength >= 1:
             body += self._pick_particle(kind, particle_present)
 
-        # 6. 波浪号
-        if settings.add_tilde:
+        # 6. 波浪号（句末语气词可能已经带了 ~，别叠成「喵~~」）
+        if settings.add_tilde and not body.endswith(("~", "～")):
             body += "~"
 
         # 7. 还原句末标点

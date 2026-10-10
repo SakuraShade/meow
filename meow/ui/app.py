@@ -188,6 +188,7 @@ class MeowWindow:
         checks = ttk.Frame(card, style="Card.TFrame")
         checks.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 2))
         self._add_check(checks, "add_tilde", "句末加「~」")
+        self._add_check(checks, "split_on_space", "空格也算分句（英文句子建议关掉）")
         self._add_check(checks, "only_subject_object", "只替换主语/宾语位置的代词")
         self._add_check(checks, "auto_send", "改写后自动发送回车")
         row += 1
@@ -512,6 +513,7 @@ class MeowWindow:
                     display_var.set(formatter(value))
 
             self._checks["add_tilde"].set(params.add_tilde)
+            self._checks["split_on_space"].set(params.split_on_space)
             self._checks["only_subject_object"].set(params.only_subject_object)
             self._checks["auto_send"].set(settings.auto_send)
             self._hotkey_var.set(settings.hotkey)

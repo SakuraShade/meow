@@ -13,8 +13,9 @@ _uidata/
 # ---- 测试临时目录 ----
 tests/_tmp/
 
-# ---- uiautomation 自己写的调试日志 ----
+# ---- uiautomation / 输入法自己写的调试日志 ----
 @AutomationLog.txt
+debug.log
 
 # ---- IDE / 系统 ----
 .idea/

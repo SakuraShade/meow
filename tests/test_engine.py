@@ -68,9 +68,83 @@ class TestSentenceHelpers(unittest.TestCase):
         segments = split_sentences("第一行\n第二行")
         self.assertEqual([s.kind for s in segments], ["sentence", "newline", "sentence"])
 
-    def test_split_sentences_blank_input_has_no_segments(self):
+    def test_split_sentences_blank_input_has_no_sentences(self):
         self.assertEqual(split_sentences(""), [])
-        self.assertEqual(split_sentences("   "), [])
+        # 纯空白不再变成空句子，而是原样保留成一段分隔符
+        self.assertEqual([s.kind for s in split_sentences("   ")], ["separator"])
+        self.assertTrue(all(not s.is_sentence for s in split_sentences("   ")))
+
+    # ---------------- 分句符 ----------------
+
+    def assert_split_texts(self, text, expected_sentences, **kwargs):
+        segments = split_sentences(text, **kwargs)
+        actual = [s.text for s in segments if s.is_sentence]
+        self.assertEqual(actual, expected_sentences)
+        return segments
+
+    def test_fullwidth_comma_splits(self):
+        self.assert_split_texts("你好，今天天气真好。", ["你好", "今天天气真好。"])
+        self.assert_split_texts("早上好，今天天气不错，我准备出门了。",
+                                ["早上好", "今天天气不错", "我准备出门了。"])
+
+    def test_halfwidth_comma_splits(self):
+        self.assert_split_texts("你好,今天天气真好.", ["你好", "今天天气真好."])
+
+    def test_fullwidth_and_halfwidth_behave_the_same(self):
+        full = split_sentences("你好，今天天气真好。")
+        half = split_sentences("你好,今天天气真好.")
+        self.assertEqual([s.kind for s in full], [s.kind for s in half])
+
+    def test_semicolon_and_colon_split(self):
+        self.assert_split_texts("第一句；第二句：第三句", ["第一句", "第二句", "第三句"])
+
+    def test_enumeration_comma_splits(self):
+        self.assert_split_texts("苹果、香蕉、橘子", ["苹果", "香蕉", "橘子"])
+
+    def test_space_splits(self):
+        self.assert_split_texts("你好 今天天气真好", ["你好", "今天天气真好"])
+
+    def test_space_splitting_can_be_turned_off(self):
+        self.assert_split_texts("你好 今天天气真好", ["你好 今天天气真好"], split_on_space=False)
+
+    def test_halfwidth_period_ends_sentence(self):
+        self.assert_split_texts("Hello. How are you?", ["Hello.", "How", "are", "you?"])
+
+    def test_consecutive_enders_stay_together(self):
+        self.assert_split_texts("真的吗？？？", ["真的吗？？？"])
+        self.assert_split_texts("等等...", ["等等..."])
+
+    # ---------------- 不该被切开的东西 ----------------
+
+    def test_decimal_not_split(self):
+        self.assert_split_texts("圆周率是 3.14", ["圆周率是", "3.14"])
+
+    def test_domain_and_filename_not_split(self):
+        self.assert_split_texts("example.com", ["example.com"])
+        self.assert_split_texts("index.js", ["index.js"])
+
+    def test_url_not_split(self):
+        self.assert_split_texts("http://a.com/b", ["http://a.com/b"])
+
+    def test_time_not_split(self):
+        self.assert_split_texts("12:30", ["12:30"])
+
+    def test_thousands_separator_not_split(self):
+        self.assert_split_texts("1,000", ["1,000"])
+
+    # ---------------- 分隔符保留 ----------------
+
+    def test_separators_are_kept_verbatim(self):
+        segments = split_sentences("你好，今天天气真好。")
+        self.assertEqual([s.kind for s in segments], ["sentence", "separator", "sentence"])
+        self.assertEqual(segments[1].text, "，")
+        self.assertEqual(segments[1].literal, "，")
+
+    def test_newline_and_separator_are_literals(self):
+        newline = [s for s in split_sentences("a\nb") if s.kind == "newline"][0]
+        self.assertEqual(newline.literal, "\n")
+        sentence = [s for s in split_sentences("a\nb") if s.is_sentence][0]
+        self.assertIsNone(sentence.literal)
 
     def test_split_sentences_no_trailing_punctuation(self):
         segments = split_sentences("没有标点")
@@ -138,7 +212,8 @@ class TestCatifyEngine(unittest.TestCase):
 
     def test_empty_input(self):
         self.assertEqual(self.engine.catify("", CatifyParams()), "")
-        self.assertEqual(self.engine.catify("   ", CatifyParams()), "")
+        # 纯空白没有句子可改，原样返回（service 层另有 strip() 兜底）
+        self.assertEqual(self.engine.catify("   ", CatifyParams()), "   ")
 
     def test_punctuation_only_input_returns_empty(self):
         self.assertEqual(self.engine.catify("。", CatifyParams()), "")
@@ -184,6 +259,45 @@ class TestCatifyEngine(unittest.TestCase):
         result = self.engine.rewrite("你好", strength=0, add_tilde=False)
         self.assertEqual(result, "你好")
 
+    # ---------------- 逗号分句后的整体效果 ----------------
+
+    def test_every_clause_gets_its_own_particle(self):
+        result = self.engine.catify(
+            "你好，今天天气真好", CatifyParams(strength=1, add_tilde=False)
+        )
+        particles = ("喵呜", "喵~", "喵", "呀", "呐", "吖")
+        head, separator, tail = result.partition("，")
+        self.assertEqual(separator, "，", "逗号要保留在输出里")
+        self.assertTrue(head.startswith("你好"))
+        self.assertTrue(tail.startswith("今天天气真好"))
+        self.assertTrue(head.endswith(particles), head)
+        self.assertTrue(tail.endswith(particles), tail)
+
+    def test_comma_is_not_pushed_behind_the_particle(self):
+        # 旧实现里半角标点会卡在「喵」前面，变成「真好.喵~」
+        for source in ("你好,今天天气真好.", "你好，今天天气真好。"):
+            result = self.engine.catify(source, CatifyParams(strength=1))
+            self.assertNotIn(".喵", result)
+            self.assertNotIn("，喵", result)
+
+    def test_halfwidth_and_fullwidth_give_same_shape(self):
+        params = CatifyParams(strength=1, seed=7)
+        full = self.engine.catify("你好，今天天气真好", params)
+        half = self.engine.catify("你好,今天天气真好", params)
+        self.assertEqual(full.replace("，", ","), half)
+
+    def test_no_double_tilde(self):
+        # 句末语气词本身带 ~ 时不该再叠一个
+        for seed in range(12):
+            result = self.engine.catify("我准备出门了", CatifyParams(seed=seed, add_tilde=True))
+            self.assertNotIn("~~", result)
+
+    def test_separators_survive_round_trip(self):
+        source = "第一句；第二句：第三句"
+        result = self.engine.catify(source, CatifyParams(strength=1))
+        for separator in ("；", "："):
+            self.assertIn(separator, result)
+
     def test_out_of_range_params_get_clamped(self):
         result = self.engine.catify("你好", CatifyParams(strength=99, add_tilde=False))
         self.assertIsInstance(result, str)
@@ -215,6 +329,11 @@ class TestGoldenOutput(unittest.TestCase):
     这组数据是在 v2 重构时逐字节比对过 v1 输出后记录下来的
     （v1 全局 ``random.seed(42)`` 的结果），所以它同时起到了
     「重构没有改变行为」的回归保护作用。
+
+    之后有两次**有意**的调整，样本已同步更新：
+
+    * 逗号、分号、空格也会分句，且分隔符本身原样保留；
+    * 句末语气词已经带 ``~`` 时不再叠加（不再出现「喵~~」）。
     """
 
     GOLDEN = {
@@ -232,7 +351,7 @@ class TestGoldenOutput(unittest.TestCase):
         '你吃饭了吗': '主人吃饭了吗喵~？(・ω・)',
         '今天天气真好': '今天天气真好喵~(๑>◡<๑)',
         '陪我玩好不好？': '陪我玩好不好喵~？ฅ^•ﻌ•^ฅ',
-        '对不起，我错了。': '对不起，本喵错了喵~(=･ω･=)',
+        '对不起，我错了。': '对不起喵~，本喵错了喵~',
         '我饿了': '本喵饿了喵~(=･ω･=)',
         '饿了吗': '主人饿了吗喵~？(・ω・)',
         '吃饭了吗': '主人吃饭了吗喵~？(・ω・)',
@@ -248,8 +367,8 @@ class TestGoldenOutput(unittest.TestCase):
         "不过可能会下雨。记得带伞哦。那我们在公园门口见。路上小心。我等你。别迟到。"
     )
     PARAGRAPH_GOLDEN = (
-        '早上好喵呜~(=①ω①=)今天天气不错呐~本喵准备出门了喵~主人要一起去吗喵~？本喵带了便当呐~(´･ω･`)不过可能会'
-        '下雨呀~本喵记得带伞哦喵~~那我们在公园门口见吖~路上小心呐~(*≧ω≦)本喵等主人呐~别迟到呀~'
+        '早上好喵呜~(=①ω①=)今天天气不错呐~本喵准备出门了喵~主人要一起去吗喵~？本喵带了便当呐~(´･ω･`)不过可'
+        '能会下雨呀~本喵记得带伞哦喵~那我们在公园门口见吖~路上小心呐~(*≧ω≦)本喵等主人呐~别迟到呀~'
     )
 
     def test_single_sentences(self):

@@ -69,6 +69,7 @@ class CatifyParams:
     kaomoji_std: float = 1.0         # 间隔的标准差
     only_subject_object: bool = False  # 只替换主语/宾语位置的代词
     add_tilde: bool = True           # 句末追加 "~"
+    split_on_space: bool = True      # 空格也当作分句符（关掉可保住英文句子）
     seed: int | None = None          # 固定随机种子（调试/复现用）
 
     def clamp(self) -> "CatifyParams":
@@ -81,6 +82,7 @@ class CatifyParams:
             kaomoji_std=clamp_float(self.kaomoji_std, 1.0, *KAOMOJI_STD_RANGE),
             only_subject_object=clamp_bool(self.only_subject_object, False),
             add_tilde=clamp_bool(self.add_tilde, True),
+            split_on_space=clamp_bool(self.split_on_space, True),
             seed=None if self.seed is None else clamp_int(self.seed, 0, 0, 2**31 - 1),
         )
 
@@ -97,6 +99,7 @@ class CatifyParams:
             kaomoji_std=clamp_float(data.get("kaomoji_std"), defaults.kaomoji_std, *KAOMOJI_STD_RANGE),
             only_subject_object=clamp_bool(data.get("only_subject_object"), defaults.only_subject_object),
             add_tilde=clamp_bool(data.get("add_tilde"), defaults.add_tilde),
+            split_on_space=clamp_bool(data.get("split_on_space"), defaults.split_on_space),
             seed=None if data.get("seed") is None else clamp_int(data.get("seed"), 0, 0, 2**31 - 1),
         )
 
@@ -108,5 +111,6 @@ class CatifyParams:
             "kaomoji_std": self.kaomoji_std,
             "only_subject_object": self.only_subject_object,
             "add_tilde": self.add_tilde,
+            "split_on_space": self.split_on_space,
             "seed": self.seed,
         }
