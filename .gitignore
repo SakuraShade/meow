@@ -1,0 +1,24 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 运行时数据（配置、日志、图标缓存）----
+data/
+_uidata/
+
+# ---- 测试临时目录 ----
+tests/_tmp/
+
+# ---- uiautomation 自己写的调试日志 ----
+@AutomationLog.txt
+
+# ---- IDE / 系统 ----
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini

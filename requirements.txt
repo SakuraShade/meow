@@ -1,0 +1,13 @@
+# meow 运行依赖（Windows）
+#
+# 核心依赖：这三个是必须的
+jieba>=0.42.1          # 中文分词，用来补主语、替换人称代词
+keyboard>=0.13.5       # 全局键盘钩子（拦截 Enter、注册开关快捷键）
+pyperclip>=1.8.2       # 剪贴板兜底：操作 UIAutomation 读不到的自绘输入框
+uiautomation>=2.0.18   # 直接读写输入框内容（首选方式，不打扰剪贴板）
+
+# 图形界面用标准库自带的 tkinter，托盘用 ctypes 调 Win32 API，
+# 所以不需要 PyQt / PySide / pystray / Pillow。
+#
+# 安装：
+#   python -m pip install -r requirements.txt
