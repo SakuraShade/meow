@@ -15,10 +15,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from meow.engine import CatifyEngine, CatifyParams  # noqa: E402
+from meow.engine.analyzer import (  # noqa: E402
+    detect_emotion,
+    infer_subject,
+    is_imperative,
+    needs_subject,
+    tokenize,
+)
 from meow.engine.sentence import (  # noqa: E402
     Emotion,
     SentenceKind,
-    classify_emotion,
     classify_sentence,
     has_tone_particle,
     split_sentences,
@@ -28,6 +34,11 @@ from meow.engine.sentence import (  # noqa: E402
 
 def make_engine(seed: int = 42) -> CatifyEngine:
     return CatifyEngine(random.Random(seed))
+
+
+def emotion_of(text: str) -> Emotion:
+    """按词判断情绪（测试用的便捷入口）。"""
+    return detect_emotion(tokenize(text), text)
 
 
 class TestSentenceHelpers(unittest.TestCase):
@@ -48,14 +59,6 @@ class TestSentenceHelpers(unittest.TestCase):
         self.assertIs(classify_sentence("这是真的？"), SentenceKind.QUESTION)
         self.assertIs(classify_sentence("太棒了！"), SentenceKind.EXCLAIM)
         self.assertIs(classify_sentence("今天天气不错。"), SentenceKind.STATEMENT)
-
-    def test_classify_emotion_priority(self):
-        # 注意优先级：只要句子里有开心字，就不会判成难过（v1 行为）
-        self.assertIs(classify_emotion("好开心啊"), Emotion.HAPPY)
-        self.assertIs(classify_emotion("好难过"), Emotion.HAPPY)
-        self.assertIs(classify_emotion("太难过了"), Emotion.SAD)
-        self.assertIs(classify_emotion("真讨厌"), Emotion.ANGRY)
-        self.assertIs(classify_emotion("今天星期三"), Emotion.NEUTRAL)
 
     def test_split_sentences_keeps_blank_lines(self):
         segments = split_sentences("你好。\n\n在吗？")
@@ -150,6 +153,106 @@ class TestSentenceHelpers(unittest.TestCase):
         segments = split_sentences("没有标点")
         self.assertEqual(len(segments), 1)
         self.assertEqual(segments[0].text, "没有标点")
+
+
+class TestEmotion(unittest.TestCase):
+    """词级情绪判断：单字只按「独立成词」匹配，多字短语做子串匹配。"""
+
+    def test_happy(self):
+        for text in ("今天天气真好", "好开心", "太棒了", "好可爱", "我爱你", "点赞",
+                     "厉害", "幸福", "激动", "开心死了"):
+            with self.subTest(text=text):
+                self.assertIs(emotion_of(text), Emotion.HAPPY)
+
+    def test_sad(self):
+        for text in ("好难过", "想哭", "心累", "真累", "委屈", "失望", "难受", "害怕"):
+            with self.subTest(text=text):
+                self.assertIs(emotion_of(text), Emotion.SAD)
+
+    def test_angry(self):
+        for text in ("生气", "气死我了", "真烦", "讨厌", "滚蛋", "愤怒", "恶心", "无语"):
+            with self.subTest(text=text):
+                self.assertIs(emotion_of(text), Emotion.ANGRY)
+
+    def test_neutral(self):
+        # 这些在旧的「单字匹配」下全都会误判
+        for text in ("天气", "麻烦你了", "积累", "爱好", "美国", "你好", "好的",
+                     "今天星期三", "明白", "赞助"):
+            with self.subTest(text=text):
+                self.assertIs(emotion_of(text), Emotion.NEUTRAL)
+
+    def test_no_angry_for_weather(self):
+        # 用户反馈的核心 bug：「气」在「天气」里误判成生气
+        self.assertIs(emotion_of("今天天气真好"), Emotion.HAPPY)
+        self.assertNotIn("▼皿", "今天天气真好")
+
+    def test_negation_flips_happy_to_sad(self):
+        self.assertIs(emotion_of("不开心"), Emotion.SAD)
+        self.assertIs(emotion_of("我好不开心"), Emotion.SAD)
+        self.assertIs(emotion_of("我不高兴"), Emotion.SAD)
+
+    def test_negation_cancels_sad_and_angry(self):
+        self.assertIs(emotion_of("不难过"), Emotion.NEUTRAL)
+        self.assertIs(emotion_of("别生气"), Emotion.NEUTRAL)
+        self.assertIs(emotion_of("我没生气"), Emotion.NEUTRAL)
+
+    def test_a_not_a_questions_are_not_negation(self):
+        # 「喜不喜欢」「高兴不高兴」是在问要不要，不是否定
+        self.assertIs(emotion_of("喜不喜欢"), Emotion.HAPPY)
+        self.assertIs(emotion_of("开不开心"), Emotion.HAPPY)
+        self.assertIs(emotion_of("高兴不高兴"), Emotion.HAPPY)
+
+    def test_priority_happy_wins_ties(self):
+        # 同时出现开心和难过时，开心优先（沿用 v1 的优先级）
+        self.assertIs(emotion_of("开心又难过"), Emotion.HAPPY)
+
+
+class TestSubjectInference(unittest.TestCase):
+    """补主语时挑「主人」还是「本喵」。"""
+
+    def assert_subject(self, text: str, expected: str) -> None:
+        tokens = tokenize(text)
+        self.assertTrue(needs_subject(text, tokens), f"{text!r} 应该需要补主语")
+        self.assertEqual(infer_subject(text, tokens), expected)
+
+    def test_imperative_verbs_with_first_person_object(self):
+        # 动作冲着「本喵」来 → 主语是对方（主人）
+        for text in ("来陪我玩", "帮我一下", "抱抱我", "陪我去"):
+            with self.subTest(text=text):
+                self.assert_subject(text, "主人")
+
+    def test_imperative_leaders(self):
+        for text in ("请坐", "请进", "别走", "不要走", "快点", "拜托了"):
+            with self.subTest(text=text):
+                self.assert_subject(text, "主人")
+
+    def test_plain_statements_use_self(self):
+        for text in ("走了", "吃了", "看电影", "起床", "陪她去"):
+            with self.subTest(text=text):
+                self.assert_subject(text, "本喵")
+
+    def test_polite_ask_forms_use_self(self):
+        # 「请问」「请教」是自报家门，不是对主人的指令
+        for text in ("请问现在几点", "请教一下"):
+            with self.subTest(text=text):
+                self.assert_subject(text, "本喵")
+
+    def test_questions_use_master(self):
+        for text in ("饿了吗", "吃饭了吗"):
+            with self.subTest(text=text):
+                self.assert_subject(text, "主人")
+
+    def test_full_pipeline_imperative(self):
+        engine = CatifyEngine()
+        params = CatifyParams(strength=0, add_tilde=False)
+        self.assertEqual(engine.catify("来陪我玩", params), "主人来陪我玩")
+        self.assertEqual(engine.catify("帮我一下", params), "主人帮本喵一下")
+        self.assertEqual(engine.catify("抱抱我", params), "主人抱抱本喵")
+        self.assertEqual(engine.catify("陪她去", params), "本喵陪那家伙去")
+
+    def test_is_imperative_false_for_self_actions(self):
+        self.assertFalse(is_imperative(tokenize("走了")))
+        self.assertFalse(is_imperative(tokenize("看电影")))
 
 
 class TestCatifyEngine(unittest.TestCase):
@@ -326,31 +429,29 @@ class TestCatifyEngine(unittest.TestCase):
 class TestGoldenOutput(unittest.TestCase):
     """黄金样本：锁定改写结果，防止后续改动悄悄改变语气。
 
-    这组数据是在 v2 重构时逐字节比对过 v1 输出后记录下来的
-    （v1 全局 ``random.seed(42)`` 的结果），所以它同时起到了
-    「重构没有改变行为」的回归保护作用。
+    最初是在 v2 重构时逐字节比对过 v1 输出后记录下来的；此后有三次
+    **有意**的调整，样本已同步更新：
 
-    之后有两次**有意**的调整，样本已同步更新：
-
-    * 逗号、分号、空格也会分句，且分隔符本身原样保留；
-    * 句末语气词已经带 ``~`` 时不再叠加（不再出现「喵~~」）。
+    * 逗号、分号、空格也分句，且分隔符原样保留；
+    * 句末语气词带 ``~`` 时不再叠加（不再出现「喵~~」）；
+    * 情绪改为「按词判断」、主语改为「疑问/祈使用主人」。
     """
 
     GOLDEN = {
-        '你好': '你好喵~(๑>◡<๑)',
-        '你好吗': '你好吗喵~？ฅ^•ﻌ•^ฅ',
+        '你好': '你好喵~(=･ω･=)',
+        '你好吗': '你好吗喵~？(・ω・)',
         '在吗': '在吗喵~？(・ω・)',
         '你在做什么？': '主人在做什么喵~？(・ω・)',
         '谢谢': '谢谢喵~(=･ω･=)',
         '谢谢你': '谢谢主人喵~(=･ω･=)',
-        '好的': '好哒喵~(๑>◡<๑)',
+        '好的': '好哒喵~(=･ω･=)',
         '是的': '是哒喵~(=･ω･=)',
         '我不知道': '本喵不知道喵~(=･ω･=)',
         '我喜欢你': '本喵喜欢主人喵~(๑>◡<๑)',
         '我爱你': '我爱你喵~(๑>◡<๑)',
         '你吃饭了吗': '主人吃饭了吗喵~？(・ω・)',
         '今天天气真好': '今天天气真好喵~(๑>◡<๑)',
-        '陪我玩好不好？': '陪我玩好不好喵~？ฅ^•ﻌ•^ฅ',
+        '陪我玩好不好？': '陪我玩好不好喵~？(・ω・)',
         '对不起，我错了。': '对不起喵~，本喵错了喵~',
         '我饿了': '本喵饿了喵~(=･ω･=)',
         '饿了吗': '主人饿了吗喵~？(・ω・)',
@@ -367,8 +468,8 @@ class TestGoldenOutput(unittest.TestCase):
         "不过可能会下雨。记得带伞哦。那我们在公园门口见。路上小心。我等你。别迟到。"
     )
     PARAGRAPH_GOLDEN = (
-        '早上好喵呜~(=①ω①=)今天天气不错呐~本喵准备出门了喵~主人要一起去吗喵~？本喵带了便当呐~(´･ω･`)不过可'
-        '能会下雨呀~本喵记得带伞哦喵~那我们在公园门口见吖~路上小心呐~(*≧ω≦)本喵等主人呐~别迟到呀~'
+        '早上好喵呜~(=･ω･=)今天天气不错呐~本喵准备出门了喵~主人要一起去吗喵~？本喵带了便当呐~(´･ω･`)不过可'
+        '能会下雨呀~本喵记得带伞哦喵~那我们在公园门口见吖~路上小心呐~(=˘ω˘=)本喵等主人呐~主人别迟到呀~'
     )
 
     def test_single_sentences(self):

@@ -17,7 +17,6 @@ from .sentence import (
     Emotion,
     Segment,
     SentenceKind,
-    classify_emotion,
     classify_sentence,
     has_tone_particle,
     split_sentences,
@@ -89,50 +88,55 @@ class CatifyEngine:
         *,
         allow_kaomoji: bool = True,
     ) -> str:
-        """改写单个句子。步骤固定为：短语替换 → 补主语 → 剥标点 →
-        分词换人称 → 加语气词 → 加波浪号 → 还原标点 → 颜文字。"""
+        """改写单个句子。步骤固定为：短语替换 → 剥标点 → 分词 →
+        补主语（疑问/祈使用「主人」）→ 换人称 → 加语气词 → 加波浪号 →
+        还原标点 → 颜文字。"""
         settings = (params or CatifyParams()).clamp()
 
         # 1. 固定短语替换
         for key, value in lexicon.PHRASE_MAP.items():
             sentence = sentence.replace(key, value)
 
-        # 2. 补主语
-        if analyzer.needs_subject(sentence):
-            sentence = analyzer.add_subject(sentence)
-
-        # 3. 摘掉句末标点，后面按句式贴回去
+        # 2. 摘掉句末标点，后面按句式贴回去
         match = TRAILING_PUNCT_RE.search(sentence)
         body = sentence[: -len(match.group(1))] if match else sentence
         body = body.strip()
         if not body:
             return ""
 
-        # 4. 分词 + 人称代词替换
+        # 3. 分词（原文先分一次，情绪和补主语都要用）
         tokens = analyzer.tokenize(body)
+        emotion = analyzer.detect_emotion(tokens, body)
+
+        # 4. 补主语：疑问/祈使句默认主语是「主人」，其余是「本喵」
+        if analyzer.needs_subject(body, tokens):
+            subject = analyzer.infer_subject(sentence, tokens)
+            body = subject + body
+            tokens = analyzer.tokenize(body)  # 补完主语，重新分词再换人称
+
+        # 5. 人称代词替换
         body = "".join(
             analyzer.replace_pronouns(tokens, only_subject_object=settings.only_subject_object)
         )
 
         kind = classify_sentence(sentence)
-        emotion = classify_emotion(sentence)
         particle_present = has_tone_particle(body)
 
-        # 5. 句末语气词
+        # 6. 句末语气词
         if settings.strength >= 1:
             body += self._pick_particle(kind, particle_present)
 
-        # 6. 波浪号（句末语气词可能已经带了 ~，别叠成「喵~~」）
+        # 7. 波浪号（句末语气词可能已经带了 ~，别叠成「喵~~」）
         if settings.add_tilde and not body.endswith(("~", "～")):
             body += "~"
 
-        # 7. 还原句末标点
+        # 8. 还原句末标点
         if kind is SentenceKind.QUESTION:
             body += "？"
         elif kind is SentenceKind.EXCLAIM:
             body += "！"
 
-        # 8. 颜文字
+        # 9. 颜文字
         if settings.strength >= 2 and allow_kaomoji:
             body += self._pick_kaomoji(emotion, kind)
 

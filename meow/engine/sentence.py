@@ -109,17 +109,6 @@ def classify_sentence(sentence: str) -> SentenceKind:
     return SentenceKind.STATEMENT
 
 
-def classify_emotion(sentence: str) -> Emotion:
-    """按关键词判断情绪，优先级：开心 > 难过 > 生气 > 中性。"""
-    if any(char in lexicon.HAPPY_CHARS for char in sentence):
-        return Emotion.HAPPY
-    if any(char in lexicon.SAD_CHARS for char in sentence):
-        return Emotion.SAD
-    if any(char in lexicon.ANGRY_CHARS for char in sentence):
-        return Emotion.ANGRY
-    return Emotion.NEUTRAL
-
-
 # ---------------- 半角标点的保护判断 ----------------
 
 
