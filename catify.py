@@ -9,8 +9,8 @@ import jieba.posseg as pseg
 
 PRONOUN_MAP = {
     "你": "主人", "您": "主人", "你们": "主人们",
-    "我": "本喵", "我们": "我们喵",
-    "咱": "本喵", "咱们": "我们喵",
+    "我": "本喵", "我们": "我们",
+    "咱": "我们", "咱们": "我们",
     "他": "那家伙", "她": "那家伙",
 }
 
@@ -41,8 +41,8 @@ NO_SUBJECT_PHRASES = {
 
 TONE_PARTICLES = set("吗呢吧啊呀哦嘛啦哟喂哈唉呗咧咯喽哒了喔")
 
-MEOW_STATEMENT      = ["喵", "喵~", "喵呜", "喵吖", "吖喵", "吖"]
-MEOW_Q_NO_PARTICLE  = ["喵", "喵吖", "吖"]
+MEOW_STATEMENT      = ["喵", "喵~", "喵呜", "呀", "呐", "吖"]
+MEOW_Q_NO_PARTICLE  = ["喵", "呀", "吖"]
 MEOW_EX_NO_PARTICLE = ["喵", "喵~", "吖"]
 MEOW_WITH_PARTICLE  = ["喵", "喵~"]
 
@@ -237,7 +237,7 @@ def catify_sentence(sent, strength=2, allow_kaomoji=True,
     elif stype == "exclaim":
         body += "！"
     else:
-        body += "。"
+        body += ""
 
     # 8. 颜文字（可选）
     if strength >= 2 and allow_kaomoji:
